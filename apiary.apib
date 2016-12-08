@@ -1,0 +1,592 @@
+FORMAT: 1A
+
+# Storage Dispatch Service 
+
+Storage Dispatch Service(SDS)是对底层对象存储服务(如Aliyun)的集中式管理和封装。它具有如下好处：
+* 文件流引流至对象存储服务，
+**不经过应用服务器**，降低应用服务器压力
+* 不暴露API Key和Secret的情况下，支持多种授权方式
+  - URL签名
+  - Post Form签名
+  - **STS**
+* **最小权限**原则，
+**多租户相互隔离**原则
+* 与企业的
+**验证和授权服务**集成，隐藏底层存储服务细节, 减少企业内部服务与对象存储服务的集成开销
+* 企业内部应用服务存储的
+**集中式管理**
+* 多账号跨地区支持
+
+
+所有API都需要在请求Header中带上OAuth2 Authorization Code:
+> _Authorization: 6e06ec17-6068-4f72-aa80-e76a792f2b0b_
+
+Storage Dispatch Service(SDS)会对每个API请求向企业用户中心进行验权, SDS在内部会区分两种服务：
+* 具有对服务存储进行管理权限的服务，后面称之为
+**管理服务(Admin Service)**
+  它具有如下功能：
+    * 注册管理服务
+    * 授信服务
+    * 存储帐号的管理
+    * 服务存储条目(Service Storage Entry)的录入和删除
+* 使用存储功能的普通受信服务，后面称之为
+**受信服务(Trusted Service)**
+  它具有如下功能：
+    * 服务存储条目的录入
+    * Re-direct下载
+    * URL签名上传
+    * Post Form多文件上传
+    * STS授权
+
+# Group 管理服务
+
+
+## 存储帐号集合 [/admin/accounts]
+存储帐号是具有某一云账户（如阿里云）RAM(访问控制)和OSS（对象存储）全部权限的高权限账户。在生成服务存储条目的时候，SDS会使用此帐号生成：
+* 权限受限的RAM用户
+* 权限受限的Access Key
+* 对应的Polices
+* STS扮演角色
+
+### 列举所有存储帐号 [GET]
+这里的provider_account_id是指存储帐号所属云帐号的ID, 在生成STS角色的时候使用
+
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+    
++ Response 200 (application/json)
+
+        [
+              {
+                "id": 1,
+                "access_key": "yEDt37OOIp25H0AQ",
+                "user_name": "oss_bucket_xxxxx",
+                "provider_account_id": "1963361685578990",
+                "desc": "Integration test",
+                "created_at": "2016-08-21T17:48:46.262341632+08:00"
+              },
+              
+              {
+                "id": 2,
+                "access_key": "OH1ISwwjEFMOobJc",
+                "user_name": "sds_storage_acc",
+                "provider_account_id": "1963361685578990",
+                "desc": "actually it is the second test account I use",
+                "created_at": "2016-08-21T18:12:51.205553112+08:00"
+              }
+        ]
+
+### 创建存储帐号 [POST]
+管理服务需要提供以下四个信息用以创建一个存储帐号
+* RAM用户的访问key和secret
+* 云账户的账户ID
+* 存储帐号的描述
+
+存储帐号的创建流程为：
+* 检查access key是否已经存在
+* 取得该access key的用户，检查是否该用户具有RAM, OSS和STS的权限
+* 录入数据库
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+            
+    + Body
+    
+            {
+                "access_key": "1RY26YzyUSeOPEfx",
+                "access_secret": "N6B4jM9N3KQ1R2I4zf6LAuHQvHQZ6D",
+                "provider_account_id": "19820810128920",
+                "desc": "actually it is the second test account I use"
+            }
+
++ Response 500 (application/json)
+
+        {
+            "error": "Aliyun API Error: RequestId: 605506A5-F171-45EB-A8C6-E5D34DB2A711 Status Code: 404 Code: InvalidAccessKeyId.NotFound Message: Specified access key is not found.",
+            "message": "storage account registration database error!"
+        }
+
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+            
+    + Body
+    
+            {
+                "access_key": "OH1ISwwjEFMOobJs",
+                "access_secret": "7eWnGmi9wYCsDxwsNjTsVqpCnXxBYq",
+                "provider_account_id": "19820810128920",
+                "desc": "actually it is the second test account I use"
+            }
+
++ Response 500 (application/json)
+
+        {
+            "error": "Current user doesn't have at least one of following policies attached: AliyunOSSFullAccess, AliyunRAMFullAccess, AliyunSTSAssumeRoleAccess",
+            "message": "storage account registration database error!"
+        }
+        
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+            
+    + Body
+    
+            {
+                "access_key": "OH1ISwwjEFMOobJd",
+                "access_secret": "7eWnGmi9wYCsDxwsNjTsVqpCnXxBYw",
+                "provider_account_id": "19820810128920",
+                "desc": "actually it is the second test account I use"
+            }
+
++ Response 200 (application/json)
+
+        {
+              "id": 2,
+              "access_key": "OH1ISwwjEFMOobJc",
+              "user_name": "sds_storage_acc",
+              "provider_account_id": "1963361685578990",
+              "desc": "actually it is the second test account I use",
+              "created_at": "2016-08-21T18:12:51.205553112+08:00"
+        }
+        
+
+## 单个存储帐号 [/admin/accounts/{storage_account_id}]
++ Parameters
+    + storage_account_id (number) - 存储帐号在数据库里的ID(整型)
+
+### 列举存储帐号详细信息 [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+    
++ Response 200 (application/json)
+
+        
+            {
+                "id": 2,
+                "key": "Oj9eQy7HVYo06hkYDV3HPsWcF2lCUP1z",
+                "service_id": "Oj9eQy7HVYo06hkYDV3HPsWcF2lCUP1z",
+                "name": "空间",
+                "desc": "this is service desc",
+                "created_at": "2016-08-21T17:48:45.656332221+08:00"
+             }
+        
+        
+## 管理服务集合 [/admin/admin_services]
+管理服务具有如下功能：
+* 注册管理服务
+* 授信服务
+* 存储帐号的管理
+* 服务存储条目(Service Storage Entry)的录入和删除
+    
+### 列举所有管理服务 [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+    
++ Response 200 (application/json)
+
+        [
+              {
+                "id": 1,
+                "key": "xmJ8iLUGu749ndODD1USEG6vwHUMyR8d",
+                "service_id": "",
+                "name": "",
+                "desc": "Storage Dispatch Service",
+                "created_at": "2016-08-21T17:48:40.215908475+08:00"
+              },
+              {
+                "id": 2,
+                "key": "Oj9eQy7HVYo06hkYDV3HPsWcF2lCUP1z",
+                "service_id": "Oj9eQy7HVYo06hkYDV3HPsWcF2lCUP1z",
+                "name": "广联云·空间",
+                "desc": "this is service desc",
+                "created_at": "2016-08-21T17:48:45.656332221+08:00"
+              }
+        ]
+
+### 注册一个新的管理服务 [POST]
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+            
+    + Body
+    
+            {
+                "service_key": "Oj9eQy7HVYo06hkYDV3HPsWcF2lCUP1z",
+                "desc": "this service is called  xx service!"
+            }
+            
+
++ Response 500 (application/json)
+
+        {
+          "error": "This admin service has already existed! Returning admin service id.",
+          "message": "error creating admin service in database!"
+        }
+
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+            
+    + Body
+    
+            {
+                "service_key": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                "desc": "what a amazing service!"
+            }
+
++ Response 200 (application/json)
+
+        {
+            "service_id": 3
+        }     
+        
+
+## 受信服务集合 [/admin/services]
+受信服务具有如下功能：
+* 服务存储条目的录入
+* Re-direct下载
+* URL签名上传
+* Post Form多文件上传
+* STS授权
+
+### 列举所有受信服务 [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+    
++ Response 200 (application/json)
+
+        [
+              {
+                "id": 1,
+                "key": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                "service_id": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                "name": "协同平台-文档",
+                "desc": "this is service desc",
+                "created_at": "2016-08-21T17:48:45.489536996+08:00"
+              }
+        ]
+
+### 注册一个新的受信服务 [POST]
+
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 3e69ae7a-c80b-4219-bc32-691d4c50c4f5
+            
+    + Body
+    
+            {
+                "service_key": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                "desc": "what a amazing service!"
+            }
+
++ Response 200 (application/json)
+
+        {
+            "service_id": 2
+        }     
+
+
+
+# Group 受信服务
+
+## 受信服务的服务存储条目集合 [/storages]
+
+### 列举该受信服务的所有存储条目 [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+    
++ Response 200 (application/json)
+
+        [
+              {
+                    "id": 1,
+                    "service_key": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                    "storage_account_id": 0,
+                    "bucket_name": "created-by-admin",
+                    "bucket_acl": "private",
+                    "bucket_region": "oss-cn-shenzhen",
+                    "bucket_desc": "Bucket created by integration test",
+                    "ram_key": "sin7iYJjDHLPfknA",
+                    "ram_role_arn": "acs:ram::1963361685578990:role/sds-u4rzl-created-by-admin-ar",
+                    "ram_user_name": "sds-u4RzL-created-by-admin"
+              },
+              {
+                    "id": 2,
+                    "service_key": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                    "storage_account_id": 1,
+                    "bucket_name": "by-service",
+                    "bucket_acl": "private",
+                    "bucket_region": "oss-cn-shenzhen",
+                    "bucket_desc": "Integration test: TestCreateServiceStorageEntryAsTrustedService",
+                    "ram_key": "GYazYHHzG1LhFqeq",
+                    "ram_role_arn": "acs:ram::1963361685578990:role/sds-u4rzl-by-service-ar",
+                    "ram_user_name": "sds-u4RzL-by-service"
+              }
+        ]
+
+### 创建一个新的服务存储条目 [POST]
+
+服务存储条目跟目标对象存储服务的的Bucket一一对应，创建时需要提供如下信息:
+* 存储帐号ID
+* Bucket名字
+* Bucket ACL
+* Bucket所处区域
+* Bucket的描述信息
+
+以最小权限为原则，服务存储条目的创建流程为：
+* 多项创建前的检查
+    * 服务是否为受信服务
+    * 是否提供的bucket名字已经存在
+    * 提供的存储帐号是否存在
+* 在提供的存储帐号下创建Bucket
+* 创建一个新的RAM用户以及对应的Access Key
+* 创建只能访问当前Bucket的Policy并设置给新创建的RAM用户
+* 创建STS扮演角色
+* 创建只能扮演当前角色的Policy,并设置给新创建的RAM用户
+* 录入数据库
+
+每个服务存储条目在创建过程中会创建如下资源:
+* 1个Bucket
+* 1个拥有Access Key的RAM用户
+* 1个STS扮演角色
+* 2条Policy: Bucket Only Policy, Assume Role Policy
+
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+            
+    + Body
+    
+            {
+                    "storage_account_id": 1,
+                    "bucket_name":       "models",
+                    "bucket_acl_name":    "private",
+                    "bucket_region_name": "shenzhen",
+                    "bucket_desc":       "used by an example service to store models"
+            }
+            
+
++ Response 500 (application/json)
+
+        {
+                "error": "error when creating bucket! error: Aliyun API Error: RequestId: 57B98D25F90A2444C1F09FDD Status Code: 409 Code: BucketAlreadyExists Message: The requested bucket name is not available. The bucket namespace is shared by all users of the system. Please select a different name and try again.",
+                "message": "service storage registration error!"
+        }
+
++ Request (application/json)
+
+    + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+            
+    + Body
+    
+            {
+                    "storage_account_id": 1,
+                    "bucket_name":       "models",
+                    "bucket_acl_name":    "private",
+                    "bucket_region_name": "shenzhen",
+                    "bucket_desc":       "used by an example service to store models"
+            }
+
++ Response 200 (application/json)
+
+            {
+                  "id": 3,
+                  "service_key": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                  "storage_account_id": 1,
+                  "bucket_name": "models-data",
+                  "bucket_acl": "private",
+                  "bucket_region": "oss-cn-shenzhen",
+                  "bucket_desc": "used by an example service to store models",
+                  "ram_key": "8aieWRCPWvPMq4hQ",
+                  "ram_role_arn": "acs:ram::1963361685578990:role/sds-u4rzl-models-data-ar",
+                  "ram_user_name": "sds-u4RzL-models-data"
+            }    
+        
+## 受信服务的单个服务存储条目 [/storages/{service_storage_entry_id}]
++ Parameters
+    + service_storage_entry_id (number) - 服务存储条目的ID(整型)
+    
+### 单个服务存储条目详细信息 [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+
++ Response 200 (application/json)
+
+            {
+                  "id": 1,
+                  "service_key": "u4RzLv2rRtnOHVFaAPOwhBVsYZpif8tv",
+                  "storage_account_id": 0,
+                  "bucket_name": "created-by-admin",
+                  "bucket_acl": "private",
+                  "bucket_region": "oss-cn-shenzhen",
+                  "bucket_desc": "Bucket created by integration test",
+                  "ram_key": "sin7iYJjDHLPfknA",
+                  "ram_role_arn": "acs:ram::1963361685578990:role/sds-u4rzl-created-by-admin-ar",
+                  "ram_user_name": "sds-u4RzL-created-by-admin"
+                
+            }
+            
+
+
+## 受信服务的单个文件对象 [/storages/{service_storage_entry_id}/objects/{object_key}]
++ Parameters
+    + service_storage_entry_id (number) - 服务存储条目的ID(整型)
+    + object_key (string) - 文件对象全路径
+    
+
+### 下载单个文件对象 [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+            
+            
+### 获取单个文件的HEAD信息 [HEAD]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+            
+    
++ Response 200
+      + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+            
+            
+            Content-Length: 3048462
+            Content-Type: application/octet-stream
+            Date: Sun, 21 Aug 2016 13:57:15 GMT
+            Etag: "408B374D04963D433F58C16F956E9C7E"
+            Last-Modified: Sun, 21 Aug 2016 09:48:55 GMT
+            Server: AliyunOSS
+            X-Oss-Hash-Crc64ecma: 2290789532661794309
+            X-Oss-Object-Type: Normal
+            X-Oss-Request-Id: 57B9B33AB551FD851E9B762C
+            X-Oss-Server-Time: 127
+
+## 受信服务上传已确定文件名的文件的签名URL [/storages/{service_storage_entry_id}/objects/{object_key}/upload_url]
+请在如下情境使用签名URL
+* 仅上传
+* 单个文件
+* 确定文件名
+
++ Parameters
+    + service_storage_entry_id (number) - 服务存储条目的ID(整型)
+    + object_key (string) - 文件对象全路径
+    
+### 获取签名URL [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+
+            
++ Response 200 (application/json)
+
+        {
+          "url": "https://by-service.oss-cn-shenzhen.aliyuncs.com/EircomPark.nwd?Expires=1471788484&OSSAccessKeyId=GYazYHHzG1LhFqeq&Signature=ypt%2BiU4lCPBpta%2B2msWk%2FMHchAA%3D"
+        }
+
+## 受信服务用以多文件post form上传的policy token [/storages/{service_storage_entry_id}/policy_token]
+请在如下情境使用Policy Token进行上传
+* 仅上传
+* 多个文件
+* 文件Path前缀确定或无
+* 客户端使用Post表单上传
+
++ Parameters
+    + service_storage_entry_id (number) - 服务存储条目的ID(整型)
+
+### 获取该policy token [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+    
++ Response 200 (application/json)    
+
+        {
+          "accessid": "GYazYHHzG1LhFqeq",
+          "host": "https://by-service.oss-cn-shenzhen.aliyuncs.com",
+          "expire": 1471787888,
+          "signature": "lx3SdzA/S4kcO77aR12znnakhJA=",
+          "policy": "eyJleHBpcmF0aW9uIjoiMjAxNi0wOC0yMVQyMTo1ODowOFoiLCJjb25kaXRpb25zIjpbWyJzdGFydHMtd2l0aCIsIiRrZXkiLCJNb2RlbHMvUGF0aCJdXX0=",
+          "dir": "Models/Path",
+          "callback": "eyJjYWxsYmFja1VybCI6IiIsImNhbGxiYWNrQm9keSI6ImZpbGVuYW1lPSR7b2JqZWN0fVx1MDAyNnNpemU9JHtzaXplfVx1MDAyNm1pbWVUeXBlPSR7bWltZVR5cGV9XHUwMDI2aGVpZ2h0PSR7aW1hZ2VJbmZvLmhlaWdodH1cdTAwMjZ3aWR0aD0ke2ltYWdlSW5mby53aWR0aH0iLCJjYWxsYmFja0JvZHlUeXBlIjoiYXBwbGljYXRpb24veC13d3ctZm9ybS11cmxlbmNvZGVkIn0="
+        }
+
+## 受信服务STS授权凭证 [/storages/{service_storage_entry_id}/sts]
+请在如下情境使用STS
+* 短时间内会有很多的上传与下载
+* 很多文件
+
+或:
+* 使用Aliyun原生SDK进行分片上传
+
+STS多用户原生客户端，如移动或者桌面端
+
++ Parameters
+    + service_storage_entry_id (number) - 服务存储条目的ID(整型)
+
+### 获取该STS授权凭证 [GET]
++ Request (application/json)
+
+  + Headers
+  
+            Authorization: 357d080e-c9c4-4032-b4a1-4cff5c0e491a
+
++ Response 200 (application/json)
+
+        {
+          "access_key": "STS.MZCNRD4JxMRmZjaauu3srp5Ut",
+          "access_secret": "Ars49FigURbQ7PoWN1UFaGsYkYEKzgeAnarRCrqEgFNL",
+          "security_token": "CAESmgMIARKAAQ4lo1mfEnFirgRJlMoLyHmxMzA1uyVF5FVzijrhlie9tW5YNEZmOn55vKuAJPnVarEWZibiMIfDp7DHZJMU175yRGMKobyINlznftRglaLwQ6ZfRENj344KtcAhCepyl5APo4lSb+kdu9MFkCthXuXlbfakgKR7OvW9+fwpqBnMGh1TVFMuTVpDTlJENEp4TVJtWmphYXV1M3NycDVVdCISMzYxOTI1MjcxNzcyOTI5ODU1KglzZHMtc3NlLTIwnpPj7OoqOgZSc2FNRDVCZAoBMRpfCgVBbGxvdxInCgxBY3Rpb25FcXVhbHMSBkFjdGlvbhoPCg1vc3M6R2V0T2JqZWN0Ei0KDlJlc291cmNlRXF1YWxzEghSZXNvdXJjZRoRCg9hY3M6b3NzOio6KjoqLypKEDE5NjMzNjE2ODU1Nzg5OTBSBTI2ODQyWg9Bc3N1bWVkUm9sZVVzZXJgAGoSMzYxOTI1MjcxNzcyOTI5ODU1chdzZHMtdTRyemwtYnktc2VydmljZS1hcnjuydaerLW+Aw==",
+          "Expiration": "2016-08-21T14:54:46Z"
+        }
